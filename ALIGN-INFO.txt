@@ -1,0 +1,9 @@
+对齐实验目录（2026-11-03 建立）
+基线: 复制自 /root/asr-service（原 funasr_runtime.py md5 8f2eb5a3fd38248d988c5e9c5882b87b, 153 行）
+变更1: app/services/funasr_runtime.py 替换为 v2 开发版（md5 fb01b8bd4787459dbeae0dcf04946c3e, 342 行）
+变更2: requirements.txt 锁定 funasr==1.3.1（对齐旧版生产实测版本）
+变更3: 删除副本内 models/uploads/asr_service.db（构建不需要，模型运行时挂载）
+未动: Dockerfile.gpu / 原目录 /root/asr-service / 全部既有镜像 tag 与 tar 包
+用途: 旧版 funasr 1.3.1 A/B 实验镜像 asr-service:v20261103-align
+回滚: 删除实验容器与实验 tag 即可, 开发版以 /root/asr-service 与本地工作区为准
+变更4: 构建方式改为派生自 v1.1-gpu（Dockerfile.align），仅替换 funasr==1.3.1，避免重下 3GB NVIDIA wheels

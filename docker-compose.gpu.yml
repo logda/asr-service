@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  asr-service:
+    build: .
+    container_name: asr-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+      - ./uploads:/app/uploads
+      - ./asr_service.db:/app/asr_service.db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

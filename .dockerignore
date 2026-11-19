@@ -1,0 +1,4 @@
+/models/
+/uploads/
+*.db
+__pycache__/
