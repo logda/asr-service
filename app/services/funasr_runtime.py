@@ -38,6 +38,8 @@ _DIGIT_CHARS = set("零一二三四五六七八九两0123456789")
 # 常用双字词兜底；避免 jieba 缺失或金融场景新词不在词典时漏判。
 _BOUNDARY_WORDS = frozenset({"关于", "可以", "微信", "每个", "程序", "比如", "当场", "首绑"})
 _JIEBA = None
+# 热词允许的分隔符：空白、中英文逗号、顿号、分号、竖线
+_HOTWORD_SPLIT_RE = re.compile(r"[\s,，、;；|]+")
 
 
 def _resolve_local_model_dir(models_dir: str, model_name: str) -> str:
@@ -105,6 +107,46 @@ def _init_model():
         _funasr_available = False
         _model = None
     return _model
+
+
+def _normalize_hotword(raw: Optional[str]) -> Optional[str]:
+    """清洗热词串：多分隔符切分、去重保序、按词数与字数控断。
+
+    SeACo 的偏置编码长度有限，超量热词既拖慢解码又稀释相关词权重，
+    因此必须硬性截断，不能原样透传。
+    """
+    if not raw:
+        return None
+    words: List[str] = []
+    seen = set()
+    total = 0
+    for word in _HOTWORD_SPLIT_RE.split(raw.strip()):
+        if not word or word in seen:
+            continue
+        if len(words) >= settings.MAX_HOTWORD_WORDS:
+            logger.warning(f"热词超过 {settings.MAX_HOTWORD_WORDS} 个，已截断")
+            break
+        if total + len(word) > settings.MAX_HOTWORD_CHARS:
+            logger.warning(f"热词总字数超过 {settings.MAX_HOTWORD_CHARS}，已截断")
+            break
+        seen.add(word)
+        words.append(word)
+        total += len(word)
+    return " ".join(words) or None
+
+
+def _resolve_hotword(raw: Optional[str]) -> Optional[str]:
+    """请求热词优先；为空时回退到全局默认词表。"""
+    if not settings.HOTWORD_ENABLED:
+        return None
+    return _normalize_hotword(raw) or _normalize_hotword(settings.DEFAULT_HOTWORDS)
+
+
+def _hotword_supported() -> bool:
+    """只有 SeACo-Paraformer 带偏置解码器；普通 Paraformer 会静默忽略 hotword。"""
+    inner = getattr(_model, "model", None)
+    name = type(inner).__name__ if inner is not None else ""
+    return "seaco" in name.lower() or "seaco" in settings.FUNASR_MODEL.lower()
 
 
 def _strip_trailing_punct(text: str) -> str:
@@ -325,12 +367,23 @@ def _normalize_result(file_path: str, res: Any) -> Dict[str, Any]:
     }
 
 
-def transcribe_local(file_path: str) -> Dict[str, Any]:
+def transcribe_local(file_path: str, hotword: Optional[str] = None) -> Dict[str, Any]:
     m = _init_model()
-    if _funasr_available and m is not None:
-        res = m.generate(input=file_path)
-        return _normalize_result(file_path, res)
-    raise RuntimeError("FunASR model unavailable")
+    if not (_funasr_available and m is not None):
+        raise RuntimeError("FunASR model unavailable")
+    normalized = _resolve_hotword(hotword)
+    if normalized and not _hotword_supported():
+        logger.warning(
+            f"[hotword] 当前模型 {settings.FUNASR_MODEL} 不支持热词，已忽略；"
+            "需切换到 SeACo-Paraformer"
+        )
+        normalized = None
+    if normalized:
+        logger.info(f"[hotword] applied {len(normalized.split())} word(s)")
+    # 显式传 hotword（包括 None）：AutoModel 会把 cfg 合入 self.kwargs，
+    # 不传则可能残留上一次请求的热词。SeACo 对 None 走普通解码路径。
+    res = m.generate(input=file_path, hotword=normalized)
+    return _normalize_result(file_path, res)
 
 
 def get_status() -> Dict[str, Any]:
@@ -339,4 +392,5 @@ def get_status() -> Dict[str, Any]:
         "available": bool(_funasr_available and m is not None),
         "model": settings.FUNASR_MODEL,
         "device": settings.FUNASR_DEVICE,
+        "hotword_supported": _hotword_supported(),
     }

@@ -28,3 +28,4 @@ class HealthResponse(BaseModel):
     available: bool
     model: str
     device: str
+    hotword_supported: bool = False

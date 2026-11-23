@@ -36,6 +36,11 @@ async def submit_transcription(
         description="json | verbose_json | text",
     ),
     language: str = Form("", description="Language code, e.g. zh, en"),
+    hotword: str = Form(
+        "",
+        description="Contextual hotwords, separated by space/comma; "
+        "empty falls back to DEFAULT_HOTWORDS",
+    ),
     timestamp_granularities: List[str] = Form(
         [],
         description="Currently only 'segment' is supported",
@@ -46,7 +51,8 @@ async def submit_transcription(
     task_id = uuid.uuid4()
     logger.info(
         f"[submit] task_id={task_id} file_url={file_url} "
-        f"model={model} response_format={response_format} language={language}"
+        f"model={model} response_format={response_format} language={language} "
+        f"hotword_chars={len(hotword or '')}"
     )
     try:
         async with AsyncSessionLocal() as session:
@@ -56,6 +62,7 @@ async def submit_transcription(
                 model=model,
                 response_format=response_format or "json",
                 language=language or "",
+                hotword=(hotword or "").strip() or None,
                 status="pending",
                 retry_count=0,
                 max_retries=2,

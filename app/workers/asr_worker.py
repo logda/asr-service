@@ -76,6 +76,7 @@ async def _process_task(task_id: str) -> None:
         await session.commit()
         file_url = task.file_url
         language = task.language or ""
+        hotword = task.hotword or ""
         task_uuid = str(task.task_id)
 
     file_path: Optional[str] = None
@@ -93,7 +94,7 @@ async def _process_task(task_id: str) -> None:
                 await session.commit()
 
         # 2) ASR (CPU/GPU heavy -> thread)
-        data = await asyncio.to_thread(transcribe_local, file_path)
+        data = await asyncio.to_thread(transcribe_local, file_path, hotword)
 
         # 3) Build result payload
         segments = []

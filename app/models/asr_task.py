@@ -14,6 +14,7 @@ class AsrTask(Base):
     model = Column(String, nullable=False)
     response_format = Column(String, default="json")
     language = Column(String, default="")
+    hotword = Column(Text, nullable=True)
     status = Column(String, default="pending")
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=2)
