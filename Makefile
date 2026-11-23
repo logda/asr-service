@@ -109,7 +109,7 @@ build-cpu: ## 构建 CPU 镜像
 	$(MAKE) build DOCKERFILE=Dockerfile.cpu
 
 ##@ 离线交付
-# 交付包结构（dist/<name>/）：镜像 tar + models + wheels + src 全量源码 + 离线部署编排/脚本
+# 交付包结构（dist/<name>.tar.gz）：镜像 tar + wheels + 离线部署编排/脚本（不含源码与模型）
 DIST_DIR  ?= dist
 DIST_NAME := $(PROJECT_NAME)-$(IMAGE_TAG)
 DIST_ROOT := $(DIST_DIR)/$(DIST_NAME)
@@ -160,6 +160,7 @@ docker load -i image-$(IMAGE_TAG).tar.gz
 test -f .env || cp .env.example .env   # 部署前请修改 ASR_API_KEY
 mkdir -p uploads/asr
 touch asr_service.db
+test -d models/iic || echo "警告: models/iic 不存在，请单独拷贝 FunASR 模型到 ./models/iic（约 1.5GB）"
 docker compose -f docker-compose.offline.yml up -d
 docker compose -f docker-compose.offline.yml ps
 endef
@@ -170,10 +171,11 @@ define PACKAGE_README
 
 ## 内容清单
 - image-$(IMAGE_TAG).tar.gz：Docker 镜像（docker load 加载，含全部 Python 依赖）
-- models/iic：FunASR 模型（运行时挂载，约 1.5GB）
 - wheels/：离线重建镜像所需的全部 wheel（可选，仅重建镜像时用）
-- src/：全量源码（app/、Dockerfile、Makefile、uv.lock 等）
 - docker-compose.offline.yml + deploy.sh：离线部署编排与一键脚本
+
+> 模型与源码不在包内：模型需单独拷贝到 models/iic（约 1.5GB，可运行
+> `make models` 下载）；源码请从代码仓库获取。
 
 ## 部署步骤
 1. 将本目录整体拷贝到目标机器
@@ -186,30 +188,20 @@ define PACKAGE_README
 endef
 export PACKAGE_README
 
-.PHONY: package package-tar
-package: ## 构建离线交付包到 dist/（镜像 tar + 模型 + wheels + 源码 + 部署脚本）
+.PHONY: package
+package: ## 构建离线交付压缩包到 dist/<name>.tar.gz（镜像 tar + wheels + 部署脚本；不含源码与模型）
 	$(MAKE) build
-	@test -d models/iic || $(MAKE) models
 	rm -rf "$(DIST_ROOT)"
-	mkdir -p "$(DIST_ROOT)/src" "$(DIST_ROOT)/models"
+	mkdir -p "$(DIST_ROOT)"
 	docker save $(IMAGE_NAME):$(IMAGE_TAG) | gzip > "$(DIST_ROOT)/image-$(IMAGE_TAG).tar.gz"
-	cp -R models/iic "$(DIST_ROOT)/models/"
 	if test -d wheels; then cp -R wheels "$(DIST_ROOT)/"; fi
-	tar --exclude='__pycache__' -cf - \
-		app scripts \
-		Dockerfile.cpu Dockerfile.gpu docker-compose.gpu.yml \
-		Makefile pyproject.toml requirements.txt uv.lock \
-		| tar -C "$(DIST_ROOT)/src" -xf -
 	cp .env.example "$(DIST_ROOT)/"
 	echo "$$OFFLINE_COMPOSE" > "$(DIST_ROOT)/docker-compose.offline.yml"
 	echo "$$DEPLOY_SH" > "$(DIST_ROOT)/deploy.sh"
 	chmod +x "$(DIST_ROOT)/deploy.sh"
 	echo "$$PACKAGE_README" > "$(DIST_ROOT)/README.md"
-	@echo "交付包已生成: $(DIST_ROOT)"
-	@du -sh "$(DIST_ROOT)" | awk '{printf "  体积: %s\n", $$1}'
-
-package-tar: package ## 在 package 基础上再打一层 tar.gz（dist/<name>.tar.gz）
 	tar -C "$(DIST_DIR)" -czf "$(DIST_TAR)" "$(DIST_NAME)"
+	rm -rf "$(DIST_ROOT)"
 	@echo "交付压缩包已生成: $(DIST_TAR)"
 	@du -sh "$(DIST_TAR)" | awk '{printf "  体积: %s\n", $$1}'
 
