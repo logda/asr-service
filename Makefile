@@ -108,8 +108,113 @@ build: ## 构建本地 Docker 镜像（IMAGE_NAME/IMAGE_TAG/DOCKERFILE/PLATFORM 
 build-cpu: ## 构建 CPU 镜像
 	$(MAKE) build DOCKERFILE=Dockerfile.cpu
 
+##@ 离线交付
+# 交付包结构（dist/<name>/）：镜像 tar + models + wheels + src 全量源码 + 离线部署编排/脚本
+DIST_DIR  ?= dist
+DIST_NAME := $(PROJECT_NAME)-$(IMAGE_TAG)
+DIST_ROOT := $(DIST_DIR)/$(DIST_NAME)
+DIST_TAR  := $(DIST_DIR)/$(DIST_NAME).tar.gz
+
+# 离线部署用 compose（不 build，直接 load 镜像；模型/上传/DB 走挂载）
+define OFFLINE_COMPOSE
+version: "3.9"
+
+services:
+  asr-service:
+    image: $(IMAGE_NAME):$(IMAGE_TAG)
+    container_name: asr-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+      - ./uploads:/app/uploads
+      - ./asr_service.db:/app/asr_service.db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+endef
+export OFFLINE_COMPOSE
+
+define DEPLOY_SH
+#!/usr/bin/env bash
+# 离线部署：目标机器需已安装 Docker、NVIDIA Container Toolkit 与 docker compose 插件
+set -euo pipefail
+cd "$$(dirname "$$0")"
+
+docker load -i image-$(IMAGE_TAG).tar.gz
+test -f .env || cp .env.example .env   # 部署前请修改 ASR_API_KEY
+mkdir -p uploads/asr
+touch asr_service.db
+docker compose -f docker-compose.offline.yml up -d
+docker compose -f docker-compose.offline.yml ps
+endef
+export DEPLOY_SH
+
+define PACKAGE_README
+# $(PROJECT_NAME) 离线交付包（$(IMAGE_TAG) / linux）
+
+## 内容清单
+- image-$(IMAGE_TAG).tar.gz：Docker 镜像（docker load 加载，含全部 Python 依赖）
+- models/iic：FunASR 模型（运行时挂载，约 1.5GB）
+- wheels/：离线重建镜像所需的全部 wheel（可选，仅重建镜像时用）
+- src/：全量源码（app/、Dockerfile、Makefile、uv.lock 等）
+- docker-compose.offline.yml + deploy.sh：离线部署编排与一键脚本
+
+## 部署步骤
+1. 将本目录整体拷贝到目标机器
+2. 执行 ./deploy.sh（或按 README 手动 docker load + compose up）
+3. 修改 .env 中的 ASR_API_KEY
+4. 探活：curl http://localhost:8001/health
+
+> GPU 版需目标机器支持 nvidia-container-toolkit；CPU 环境请用
+> `make build-cpu` 重新打包（make package DOCKERFILE=Dockerfile.cpu）。
+endef
+export PACKAGE_README
+
+.PHONY: package package-tar
+package: ## 构建离线交付包到 dist/（镜像 tar + 模型 + wheels + 源码 + 部署脚本）
+	$(MAKE) build
+	@test -d models/iic || $(MAKE) models
+	rm -rf "$(DIST_ROOT)"
+	mkdir -p "$(DIST_ROOT)/src" "$(DIST_ROOT)/models"
+	docker save $(IMAGE_NAME):$(IMAGE_TAG) | gzip > "$(DIST_ROOT)/image-$(IMAGE_TAG).tar.gz"
+	cp -R models/iic "$(DIST_ROOT)/models/"
+	if test -d wheels; then cp -R wheels "$(DIST_ROOT)/"; fi
+	tar --exclude='__pycache__' -cf - \
+		app scripts \
+		Dockerfile.cpu Dockerfile.gpu docker-compose.gpu.yml \
+		Makefile pyproject.toml requirements.txt uv.lock \
+		| tar -C "$(DIST_ROOT)/src" -xf -
+	cp .env.example "$(DIST_ROOT)/"
+	echo "$$OFFLINE_COMPOSE" > "$(DIST_ROOT)/docker-compose.offline.yml"
+	echo "$$DEPLOY_SH" > "$(DIST_ROOT)/deploy.sh"
+	chmod +x "$(DIST_ROOT)/deploy.sh"
+	echo "$$PACKAGE_README" > "$(DIST_ROOT)/README.md"
+	@echo "交付包已生成: $(DIST_ROOT)"
+	@du -sh "$(DIST_ROOT)" | awk '{printf "  体积: %s\n", $$1}'
+
+package-tar: package ## 在 package 基础上再打一层 tar.gz（dist/<name>.tar.gz）
+	tar -C "$(DIST_DIR)" -czf "$(DIST_TAR)" "$(DIST_NAME)"
+	@echo "交付压缩包已生成: $(DIST_TAR)"
+	@du -sh "$(DIST_TAR)" | awk '{printf "  体积: %s\n", $$1}'
+
 ##@ 清理
-.PHONY: clean clean-models clean-all
+.PHONY: clean clean-models clean-dist clean-all
 clean: ## 清理临时产物（缓存/字节码/测试缓存）
 	rm -rf .pytest_cache .ruff_cache $(VENV)/.pytest_cache
 	find . -path ./$(VENV) -prune -o -type d -name __pycache__ -print0 \
@@ -118,5 +223,8 @@ clean: ## 清理临时产物（缓存/字节码/测试缓存）
 clean-models: ## 删除 ./models 下已下载模型（谨慎：约 1.5GB，需重新下载）
 	rm -rf models/iic
 
-clean-all: clean clean-models ## 深度清理（= clean + clean-models + 删除虚拟环境）
+clean-dist: ## 删除 dist/ 下的离线交付产物（镜像+模型副本，体积大）
+	rm -rf $(DIST_DIR)
+
+clean-all: clean clean-models clean-dist ## 深度清理（= clean + clean-models + clean-dist + 删除虚拟环境）
 	rm -rf $(VENV)
