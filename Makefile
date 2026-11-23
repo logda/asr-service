@@ -23,7 +23,8 @@ DEV_FLAGS      := --reload
 
 # Docker / 镜像
 IMAGE_NAME     ?= $(PROJECT_NAME)
-IMAGE_TAG      ?= dev
+# 默认取 git 版本（tag > 短 hash，含未提交改动加 -dirty）；非 git 环境退化为 dev
+IMAGE_TAG      ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DOCKERFILE     ?= Dockerfile.gpu
 PLATFORM       ?= linux/amd64
 
