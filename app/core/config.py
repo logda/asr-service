@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 import os
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -22,8 +23,10 @@ class Settings(BaseSettings):
     FUNASR_DEVICE: str = "cpu"
     # 热词（hotword）基于 SeACo-Paraformer 的上下文偏置能力，普通 paraformer-zh
     # 的 inference 不接受 hotword 入参。需要无热词基线时改回 "paraformer-zh" 即可。
+    # 必须带 modelscope 命名空间前缀 iic/：无前缀 ID 既不在 name_maps_ms 别名表，
+    # 也无法被远端 snapshot_download 解析，本地缓存目录同样按 iic/<id> 存放。
     FUNASR_MODEL: str = (
-        "speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+        "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
     )
     FUNASR_VAD_MODEL: str = "fsmn-vad"
     FUNASR_PUNC_MODEL: str = "ct-punc"

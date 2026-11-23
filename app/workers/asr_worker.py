@@ -1,20 +1,19 @@
-import os
-import json
-import time
-import uuid
 import asyncio
+import json
 import logging
 import threading
+import time
+import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.models.asr_task import AsrTask
-from app.services.funasr_runtime import transcribe_local
 from app.services.file_utils import download_file, remove_file
+from app.services.funasr_runtime import transcribe_local
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +235,13 @@ def start_worker() -> None:
     """Start the background worker thread (idempotent)."""
     global _worker_thread, _worker_running
 
+    # 先无条件恢复标志再判断线程：stop_worker 后旧线程最长还要
+    # 睡 POLL_INTERVAL_SEC 才退出；若标志恢复锁在起新线程的分支里，
+    # 快速重启（uvicorn --reload）会因 is_alive 漏判而静默丢失 worker。
+    _worker_running = True
+
     # Start worker thread (it resets interrupted tasks on entry)
     if _worker_thread is None or not _worker_thread.is_alive():
-        _worker_running = True
         _worker_thread = threading.Thread(
             target=_worker_loop,
             daemon=True,

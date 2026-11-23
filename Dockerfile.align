@@ -1,5 +1,0 @@
-# 对齐实验镜像：派生自 v1.1-gpu（torch/CUDA 栈复用），仅替换 funasr 为 1.3.1 并覆盖 app 为 v2 开发版
-FROM asr-service:v1.1-gpu
-WORKDIR /app
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com funasr==1.3.1 editdistance pytorch-wpe
-COPY app/ ./app/

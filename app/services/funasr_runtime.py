@@ -1,8 +1,8 @@
+import logging
 import os
 import re
-import logging
 from difflib import SequenceMatcher
-from typing import Optional, Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 
@@ -40,6 +40,9 @@ _BOUNDARY_WORDS = frozenset({"关于", "可以", "微信", "每个", "程序", "
 _JIEBA = None
 # 热词允许的分隔符：空白、中英文逗号、顿号、分号、竖线
 _HOTWORD_SPLIT_RE = re.compile(r"[\s,，、;；|]+")
+# FunASR 的 generate_hotwords_list 对 http 开头的热词串会服务端主动 GET 下载，
+# 形成 SSRF 向量；本地模式仅接受纯文本热词，URL 形态的 token 一律丢弃。
+_HOTWORD_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 def _resolve_local_model_dir(models_dir: str, model_name: str) -> str:
@@ -122,6 +125,9 @@ def _normalize_hotword(raw: Optional[str]) -> Optional[str]:
     total = 0
     for word in _HOTWORD_SPLIT_RE.split(raw.strip()):
         if not word or word in seen:
+            continue
+        if _HOTWORD_URL_RE.match(word):
+            logger.warning("[hotword] 已丢弃 URL 形态的热词，防 SSRF")
             continue
         if len(words) >= settings.MAX_HOTWORD_WORDS:
             logger.warning(f"热词超过 {settings.MAX_HOTWORD_WORDS} 个，已截断")

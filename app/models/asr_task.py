@@ -1,7 +1,8 @@
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, Text
-from sqlalchemy.types import Uuid
+
+from sqlalchemy import Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
+from sqlalchemy.types import Uuid
 
 from app.db.base import Base
 

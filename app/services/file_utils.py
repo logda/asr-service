@@ -1,8 +1,7 @@
-import os
-import uuid
 import logging
-from urllib.parse import urlparse
+import os
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
