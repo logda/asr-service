@@ -2,3 +2,5 @@
 /uploads/
 *.db
 __pycache__/
+/.venv/
+/wheels/

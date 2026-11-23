@@ -25,6 +25,11 @@ venv/
 dist/
 build/
 
+# 离线 wheel 包不入库，只保留 wheels/ 下的下载与收集脚本
+wheels/*
+!wheels/download.sh
+!wheels/collect.sh
+
 # 编辑器与系统
 .idea/
 .vscode/

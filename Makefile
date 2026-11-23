@@ -7,12 +7,10 @@ SHELL := /bin/bash
 
 # ----- 项目配置 -----------------------------------------------------
 PROJECT_NAME   := asr-service
-PYTHON         ?= python3.12
 VENV           := .venv
 VENV_PY        := $(VENV)/bin/python
-PIP            := $(VENV_PY) -m pip
-PIP_FLAGS       := -i https://mirrors.aliyun.com/pypi/simple
-export PIP_DISABLE_PIP_VERSION_CHECK := 1
+UV             ?= uv
+# 镜像源统一配置在 pyproject.toml [[index]]（阿里云 PyPI 镜像）
 
 PORT           ?= 8001
 HOST           ?= 127.0.0.1
@@ -28,7 +26,7 @@ IMAGE_TAG      ?= $(shell git describe --tags --always --dirty 2>/dev/null || ec
 DOCKERFILE     ?= Dockerfile.gpu
 PLATFORM       ?= linux/amd64
 
-# 工具链（按需用 pip 安装，目标中自动兜底）
+# 工具链（由 uv sync 的 dev 依赖组提供，见 pyproject.toml）
 RUFF           := $(VENV)/bin/ruff
 PYTEST         := $(VENV)/bin/pytest
 FORMAT_TARGETS := app scripts tests
@@ -42,21 +40,16 @@ help: ## 显示本帮助信息
 		/^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)}' $(MAKEFILE_LIST)
 
 ##@ 环境准备
-.PHONY: venv install deps
-venv: ## 创建 Python 3.12 虚拟环境（funasr 1.3.1 兼容版本）
-	$(PYTHON) -m venv $(VENV)
-	$(VENV_PY) -m pip --version >/dev/null 2>&1 || $(VENV_PY) -m ensurepip --upgrade
-	$(PIP) install $(PIP_FLAGS) --upgrade pip
+.PHONY: venv install deps lock
+venv: ## 创建虚拟环境（uv 托管 Python，缺失时自动下载）
+	$(UV) venv $(VENV)
 
-install: venv install-deps ## 安装依赖（= venv + install-deps，可重复执行）
+install: ## 按 uv.lock 同步依赖（含 dev 工具组，可重复执行）
+	$(UV) sync
 deps: install ## make deps 的别名
 
-.PHONY: install-deps
-install-deps: ## 仅安装 requirements.txt 依赖到已有虚拟环境
-	test -x $(VENV_PY) || $(MAKE) venv
-	$(VENV_PY) -m pip --version >/dev/null 2>&1 || $(VENV_PY) -m ensurepip --upgrade
-	$(PIP) install $(PIP_FLAGS) -r requirements.txt
-	$(PIP) install $(PIP_FLAGS) ruff pytest || true
+lock: ## 重新解析依赖并更新 uv.lock（修改 pyproject.toml 后执行）
+	$(UV) lock
 
 .PHONY: models
 models: ## 预置 FunASR 模型到 ./models（本地开发首次必跑；生产为运行时挂载）
@@ -82,28 +75,27 @@ health: ## 探活 /health（需先 make run / make dev）
 .PHONY: test
 test: ## 运行冒烟测试（tests/，不存在时做导入冒烟检查）
 	@if test -d tests; then \
-		test -x $(PYTEST) || $(PIP) install $(PIP_FLAGS) pytest; \
-		$(VENV_PY) -c "import httpx" >/dev/null 2>&1 || $(PIP) install $(PIP_FLAGS) httpx; \
+		test -x $(PYTEST) || $(MAKE) install; \
 		$(VENV_PY) -m pytest tests/ -v; \
 	else \
 		echo "tests/ 不存在，执行导入冒烟检查"; \
+		test -x $(VENV_PY) || $(MAKE) install; \
 		$(VENV_PY) -c "from app.main import app; print('import OK')"; \
 	fi
 
 .PHONY: smoke
 smoke: ## 全链路冒烟（真实加载 FunASR 模型跑通提交→转写→查询，约 1 分钟；需先 make models）
-	test -x $(PYTEST) || $(PIP) install $(PIP_FLAGS) pytest
-	$(VENV_PY) -c "import httpx" >/dev/null 2>&1 || $(PIP) install $(PIP_FLAGS) httpx
+	test -x $(PYTEST) || $(MAKE) install
 	$(VENV_PY) -m pytest tests/ -m smoke_full -v
 
 .PHONY: lint
 lint: ## 静态检查（ruff check）
-	test -x $(RUFF) || $(PIP) install $(PIP_FLAGS) ruff
+	test -x $(RUFF) || $(MAKE) install
 	$(RUFF) check $(FORMAT_TARGETS)
 
 .PHONY: format
 format: ## 自动格式化（ruff format + fix）
-	test -x $(RUFF) || $(PIP) install $(PIP_FLAGS) ruff
+	test -x $(RUFF) || $(MAKE) install
 	$(RUFF) format $(FORMAT_TARGETS)
 	$(RUFF) check --fix $(FORMAT_TARGETS)
 
