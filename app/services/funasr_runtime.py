@@ -17,6 +17,28 @@ try:
 except Exception:  # funasr 未安装或版本无此符号时不影响服务启动
     pass
 
+try:
+    # FunASR 1.3.1 把说话人 embedding 的 torch 张量直接传给 UMAP；umap-learn 0.6.0
+    # 的 fit_transform 会对 X.dtype 调 np.issubdtype，torch.float32 不是 numpy dtype，
+    # 报 "Cannot interpret 'torch.float32' as a data type"。
+    # 该路径仅在 embedding 数 >= 2048（长音频）时触发，短音频冒烟覆盖不到；
+    # 这里只在 UMAP 入口把张量转成 numpy，spectral 聚类与 merge_by_cos 行为不变。
+    import torch as _torch
+    from funasr.models.campplus.cluster_backend import UmapHdbscan as _UmapHdbscan
+
+    _orig_umap_call = _UmapHdbscan.__call__
+
+    def _umap_call_numpy(self, X):
+        if isinstance(X, _torch.Tensor):
+            X = X.detach().cpu().numpy()
+        return _orig_umap_call(self, X)
+
+    if not getattr(_UmapHdbscan.__call__, "_asr_numpy_input", False):
+        _umap_call_numpy._asr_numpy_input = True
+        _UmapHdbscan.__call__ = _umap_call_numpy
+except Exception:  # funasr 未安装或内部结构变化时不影响服务启动
+    pass
+
 _model: Optional[Any] = None
 _funasr_available: bool = True
 
